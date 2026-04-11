@@ -1,39 +1,51 @@
 const express = require('express');
-const { createProxyMiddleware } = require('http-proxy-middleware');
+const http = require('http');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const STREAM_URL = 'http://95.154.197.82:10213';
 
 app.use((req, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   next();
 });
 
-app.use('/stream', createProxyMiddleware({
-  target: STREAM_URL,
-  changeOrigin: true,
-  // ← Le ";" Shoutcast est ici
-  pathRewrite: { '^/stream': '/;' },
-  selfHandleResponse: false,
-  on: {
-    proxyReq: (proxyReq) => {
-      proxyReq.setHeader('User-Agent', 'WinampMPEG/5.66');
-      proxyReq.setHeader('Accept', 'audio/mpeg, audio/*, */*');
-      proxyReq.setHeader('Icy-MetaData', '1');
-      proxyReq.setHeader('Connection', 'keep-alive');
+app.get('/stream', (req, res) => {
+  const options = {
+    hostname: '95.154.197.82',
+    port: 10213,
+    path: '/;',
+    method: 'GET',
+    headers: {
+      'User-Agent': 'WinampMPEG/5.66',
+      'Accept': 'audio/mpeg, audio/*, */*',
+      'Icy-MetaData': '1',
+      'Connection': 'keep-alive',
     },
-    proxyRes: (proxyRes) => {
-      // Force les headers Shoutcast à passer
-      proxyRes.headers['access-control-allow-origin'] = '*';
-      proxyRes.headers['content-type'] = 'audio/mpeg';
-      proxyRes.headers['cache-control'] = 'no-cache';
-    },
-    error: (err, req, res) => {
-      res.status(502).send(`Erreur proxy : ${err.message}`);
-    },
-  },
-}));
+  };
+
+  const proxyReq = http.request(options, (proxyRes) => {
+    res.writeHead(200, {
+      'Access-Control-Allow-Origin': '*',
+      'Content-Type': 'audio/mpeg',
+      'Cache-Control': 'no-cache',
+      'Transfer-Encoding': 'chunked',
+    });
+
+    proxyRes.pipe(res);
+
+    proxyRes.on('error', (err) => {
+      console.error('Erreur flux :', err.message);
+      res.end();
+    });
+  });
+
+  proxyReq.on('error', (err) => {
+    console.error('Erreur connexion :', err.message);
+    res.status(502).send(`Erreur : ${err.message}`);
+  });
+
+  proxyReq.end();
+});
 
 app.get('/', (req, res) => res.send('Proxy Shoutcast actif ✓'));
 app.listen(PORT, () => console.log(`Proxy démarré sur port ${PORT}`));
