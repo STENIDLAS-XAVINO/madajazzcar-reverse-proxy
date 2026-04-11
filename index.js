@@ -1,50 +1,59 @@
 const express = require('express');
-const http = require('http');
+const net = require('net');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use((req, res, next) => {
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  next();
-});
-
 app.get('/stream', (req, res) => {
-  const options = {
-    hostname: '95.154.197.82',
-    port: 10213,
-    path: '/;',
-    method: 'GET',
-    headers: {
-      'User-Agent': 'WinampMPEG/5.66',
-      'Accept': 'audio/mpeg, audio/*, */*',
-      'Icy-MetaData': '1',
-      'Connection': 'keep-alive',
-    },
-  };
+  const socket = net.createConnection(10213, '95.154.197.82', () => {
+    // Envoyer la requête manuellement (pas via http.request)
+    socket.write(
+      'GET /; HTTP/1.0\r\n' +
+      'Host: 95.154.197.82:10213\r\n' +
+      'User-Agent: WinampMPEG/5.66\r\n' +
+      'Accept: audio/mpeg, audio/*, */*\r\n' +
+      'Icy-MetaData: 1\r\n' +
+      'Connection: close\r\n' +
+      '\r\n'
+    );
+  });
 
-  const proxyReq = http.request(options, (proxyRes) => {
-    res.writeHead(200, {
-      'Access-Control-Allow-Origin': '*',
-      'Content-Type': 'audio/mpeg',
-      'Cache-Control': 'no-cache',
-      'Transfer-Encoding': 'chunked',
-    });
+  let headersParsed = false;
+  let buffer = Buffer.alloc(0);
 
-    proxyRes.pipe(res);
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Content-Type', 'audio/mpeg');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Transfer-Encoding', 'chunked');
 
-    proxyRes.on('error', (err) => {
-      console.error('Erreur flux :', err.message);
+  socket.on('data', (chunk) => {
+    if (!headersParsed) {
+      buffer = Buffer.concat([buffer, chunk]);
+      const headerEnd = buffer.indexOf('\r\n\r\n');
+
+      if (headerEnd !== -1) {
+        headersParsed = true;
+        // On ignore les headers ICY et on envoie uniquement l'audio
+        const audioData = buffer.slice(headerEnd + 4);
+        if (audioData.length > 0) res.write(audioData);
+      }
+    } else {
+      res.write(chunk);
+    }
+  });
+
+  socket.on('end', () => res.end());
+
+  socket.on('error', (err) => {
+    console.error('Erreur socket :', err.message);
+    if (!res.headersSent) {
+      res.status(502).send(`Erreur : ${err.message}`);
+    } else {
       res.end();
-    });
+    }
   });
 
-  proxyReq.on('error', (err) => {
-    console.error('Erreur connexion :', err.message);
-    res.status(502).send(`Erreur : ${err.message}`);
-  });
-
-  proxyReq.end();
+  req.on('close', () => socket.destroy());
 });
 
 app.get('/', (req, res) => res.send('Proxy Shoutcast actif ✓'));
