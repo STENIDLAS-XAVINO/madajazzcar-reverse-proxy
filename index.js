@@ -6,13 +6,13 @@ const PORT = process.env.PORT || 3000;
 
 app.get('/stream', (req, res) => {
   const socket = net.createConnection(10213, '95.154.197.82', () => {
-    // Envoyer la requête manuellement (pas via http.request)
+    console.log('✓ Connecté au serveur Shoutcast');
     socket.write(
       'GET /; HTTP/1.0\r\n' +
       'Host: 95.154.197.82:10213\r\n' +
       'User-Agent: WinampMPEG/5.66\r\n' +
       'Accept: audio/mpeg, audio/*, */*\r\n' +
-      'Icy-MetaData: 1\r\n' +
+      'Icy-MetaData: 0\r\n' +
       'Connection: close\r\n' +
       '\r\n'
     );
@@ -20,11 +20,11 @@ app.get('/stream', (req, res) => {
 
   let headersParsed = false;
   let buffer = Buffer.alloc(0);
+  let totalBytes = 0;
 
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Content-Type', 'audio/mpeg');
   res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Transfer-Encoding', 'chunked');
 
   socket.on('data', (chunk) => {
     if (!headersParsed) {
@@ -32,17 +32,28 @@ app.get('/stream', (req, res) => {
       const headerEnd = buffer.indexOf('\r\n\r\n');
 
       if (headerEnd !== -1) {
+        // Affiche les headers bruts dans les logs Render
+        const rawHeaders = buffer.slice(0, headerEnd).toString();
+        console.log('=== HEADERS REÇUS ===');
+        console.log(rawHeaders);
+        console.log('=====================');
+
         headersParsed = true;
-        // On ignore les headers ICY et on envoie uniquement l'audio
         const audioData = buffer.slice(headerEnd + 4);
+        console.log(`Premier chunk audio : ${audioData.length} bytes`);
         if (audioData.length > 0) res.write(audioData);
       }
     } else {
+      totalBytes += chunk.length;
+      console.log(`Audio reçu : ${totalBytes} bytes total`);
       res.write(chunk);
     }
   });
 
-  socket.on('end', () => res.end());
+  socket.on('end', () => {
+    console.log('Connexion fermée par le serveur');
+    res.end();
+  });
 
   socket.on('error', (err) => {
     console.error('Erreur socket :', err.message);
@@ -53,7 +64,10 @@ app.get('/stream', (req, res) => {
     }
   });
 
-  req.on('close', () => socket.destroy());
+  req.on('close', () => {
+    console.log('Client déconnecté');
+    socket.destroy();
+  });
 });
 
 app.get('/', (req, res) => res.send('Proxy Shoutcast actif ✓'));
