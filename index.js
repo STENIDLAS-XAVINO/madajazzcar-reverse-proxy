@@ -5,7 +5,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.get('/stream', (req, res) => {
-  const socket = net.createConnection(10213, '95.154.197.82', () => {
+  const socket = net.createConnection(10213, '95.154.197.82', () => { 
     socket.write(
       'GET /; HTTP/1.0\r\n' +
       'Host: 95.154.197.82:10213\r\n' +
