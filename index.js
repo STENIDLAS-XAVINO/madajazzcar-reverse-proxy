@@ -1,51 +1,59 @@
 const express = require('express');
-const net = require('net');
-
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.get('/stream', (req, res) => {
-  const socket = net.createConnection(10213, '95.154.197.82', () => { 
-    socket.write(
-      'GET /; HTTP/1.0\r\n' +
-      'Host: 95.154.197.82:10213\r\n' +
-      'User-Agent: WinampMPEG/5.66\r\n' +
-      'Accept: audio/mpeg, audio/*, */*\r\n' +
-      'Icy-MetaData: 0\r\n' +
-      'Connection: close\r\n' +
-      '\r\n'
-    );
-  });
+const ICECAST_URL = 'http://78.129.132.7:30032/stream';
 
-  let headersParsed = false;
-  let buffer = Buffer.alloc(0);
-
+app.options('/stream', (req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Content-Type', 'audio/mpeg');
-  res.setHeader('Cache-Control', 'no-cache');
-
-  socket.on('data', (chunk) => {
-    if (!headersParsed) {
-      buffer = Buffer.concat([buffer, chunk]);
-      const headerEnd = buffer.indexOf('\r\n\r\n');
-      if (headerEnd !== -1) {
-        headersParsed = true;
-        const audioData = buffer.slice(headerEnd + 4);
-        if (audioData.length > 0) res.write(audioData);
-      }
-    } else {
-      res.write(chunk);
-    }
-  });
-
-  socket.on('end', () => res.end());
-  socket.on('error', (err) => {
-    if (!res.headersSent) res.status(502).send(`Erreur : ${err.message}`);
-    else res.end();
-  });
-
-  req.on('close', () => socket.destroy());
+  res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', '*');
+  res.sendStatus(204);
 });
 
-app.get('/', (req, res) => res.send('Proxy Shoutcast actif ✓'));
+app.get('/stream', async (req, res) => {
+  try {
+    const response = await fetch(ICECAST_URL, {
+      headers: {
+        'User-Agent': 'WinampMPEG/5.66',
+        'Accept': 'audio/mpeg, audio/*, */*',
+        'Icy-MetaData': '1',
+      },
+    });
+
+    if (!response.ok) {
+      return res.status(response.status).send(`Source indisponible : ${response.status}`);
+    }
+
+    res.setHeader('Access-Control-Allow-Origin', '*');
+    res.setHeader('Content-Type', 'audio/mpeg');
+    res.setHeader('Cache-Control', 'no-store, no-cache');
+
+    // Pipe direct du flux vers le client
+    const reader = response.body.getReader();
+    
+    req.on('close', () => reader.cancel());
+
+    const pump = async () => {
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done || res.destroyed) break;
+          res.write(value);
+        }
+      } catch (e) {
+        // Client déconnecté, normal
+      } finally {
+        res.end();
+      }
+    };
+
+    pump();
+
+  } catch (e) {
+    if (!res.headersSent) res.status(502).send(`Erreur : ${e.message}`);
+  }
+});
+
+app.get('/', (req, res) => res.send('Proxy Icecast actif ✓'));
 app.listen(PORT, () => console.log(`Proxy démarré sur port ${PORT}`));
